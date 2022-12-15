@@ -156,8 +156,8 @@ Lemma summation_error:
    let D := default_rel t in 
    let E := default_abs t in 
   forall v: list A,
-    Binary.is_finite (fprec t) (femax t) (fold_right Fplus (Zconst t 0) v) = true ->
-    Rabs (FT2R (fold_right Fplus (Zconst t 0) v) - fold_right Rplus 0 (map A2R v)) <= 
+    Binary.is_finite (fprec t) (femax t) (fold_right Fplus neg_zero v) = true ->
+    Rabs (FT2R (fold_right Fplus neg_zero v) - fold_right Rplus 0 (map A2R v)) <= 
                (INR (List.length v) - 1) * D * fold_right Rplus 0 (map Rabs (map A2R v)) 
                       + Fplus_low_order_error t (map A2R v).
 Admitted.
@@ -175,7 +175,6 @@ intros.
 subst prods.
 unfold dotprod, sum.
 rewrite <- ! fold_symmetric by (intros; lra).
-change 0%R with (@FT2R t (Zconst t 0)).
 replace (combine (map FT2R v1) (map FT2R v2)) with (map FR2 (combine v1 v2))
  by (clear; revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto).
 assert (Datatypes.length (combine v1 v2) = n) by (rewrite combine_length; lia).
@@ -189,7 +188,6 @@ rewrite <- rev_length in H1.
 set (v := rev v12) in *. clearbody v. clear v12.
 replace (fun y x => x + y) with Rplus
  by (do 2 (apply FunctionalExtensionality.functional_extensionality; intro); lra).
-change (FT2R (Zconst t 0)) with 0 in *.
 assert (Fplus_properties (ftype t * ftype t) t
              (fun xy => Rmult (FT2R (fst xy)) (FT2R (snd xy)))
              (fun (y : ftype t * ftype t) (x : ftype t) =>
@@ -220,10 +218,144 @@ assert (Fplus_properties (ftype t * ftype t) t
                 (FT2R (fst xy)) * (FT2R (snd xy))) v)
       with (map (uncurry Rmult) (map FR2 v)) in H0
      by (apply map_map).
-  rewrite H1 in H0.
- apply H0.
-admit.
-all: fail.
+  rewrite H1 in H0. 
+ eapply H0. clear H0.
+Admitted.
+
+Import List ListNotations.
+
+Definition neg_zero {t: type} := Binary.B754_zero (fprec t) (femax t) true.
+
+Definition rounded t r:=
+(Generic_fmt.round Zaux.radix2 (SpecFloat.fexp (fprec t) (femax t))
+     (BinarySingleNaN.round_mode BinarySingleNaN.mode_NE) r).
+
+Definition error_rel (t: type) (n : nat) (r : R) : R :=
+  let e := default_abs t in
+  let d := default_rel t in
+  if (1 <=? Z.of_nat n) then 
+    ((1 + d)^(n-1) - 1) * (Rabs r + e/d)
+  else 0%R.
+
+Inductive fma_dot_prod_rel {t : type} : 
+            list (ftype t * ftype t) -> ftype t -> Prop :=
+| fma_dot_prod_rel_nil  : fma_dot_prod_rel  [] (neg_zero )
+| fma_dot_prod_rel_cons : forall l (xy : ftype t * ftype t) s,
+    fma_dot_prod_rel  l s ->
+    fma_dot_prod_rel  (xy::l) (BFMA (fst xy) (snd xy) s).
+
+Inductive R_dot_prod_rel : 
+            list (R * R) -> R -> Prop :=
+| R_dot_prod_rel_nil  : R_dot_prod_rel  [] 0%R
+| R_dot_prod_rel_cons : forall l xy s,
+    R_dot_prod_rel  l s ->
+    R_dot_prod_rel  (xy::l)  (fst xy * snd xy + s).
+
+Definition Rabsp p : R * R := (Rabs (fst p), Rabs (snd p)).
+
+Lemma dotprod_error': 
+  forall (t: type) (v1 v2: list (ftype t)), 
+  length v1 = length v2 -> forall fp rp rp_abs,
+  fma_dot_prod_rel (List.combine v1 v2) fp -> 
+    R_dot_prod_rel (List.combine (map FT2R v1)  (map FT2R v2)) rp -> 
+  R_dot_prod_rel (List.combine (map Rabs (map FT2R v1))  (map Rabs (map FT2R v2)) ) rp_abs ->
+  (forall xy, In xy (List.combine v1 v2) ->   
+      Binary.is_finite _ _ (fst xy) = true /\Binary.is_finite _ _ (snd xy) = true) ->
+  (forall x y z , BFMA x y z = fp -> 
+  Rabs (rounded t (FT2R x * FT2R y + FT2R z)) < bpow Zaux.radix2 (femax t)) /\
+  Binary.is_finite (fprec t) (femax t) fp = true ->
+  Rabs (FT2R fp - rp) <=  error_rel t (length v1  + 1) rp_abs.
+Proof.
+intros t v1 v2 Hlen.
+replace (combine (map FT2R v1) (map FT2R v2)) with (map FR2 (combine v1 v2)) in *
+ by (clear; revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto).
+replace (combine (map Rabs (map FT2R v1))
+     (map Rabs (map FT2R v2))) with (map Rabsp (map FR2 (combine v1 v2))) in *
+ by (clear; revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto).
+assert (Datatypes.length (combine v1 v2) = length v1) by 
+ (rewrite combine_length; lia).
+rewrite <- H. clear H; revert Hlen.
+induction (List.combine v1 v2).
+{
+intros Hlen fp rp rp_abs Hfp Hrp Hrpa Hin Hfin.
+inversion Hrp.
+inversion Hfp.
+inversion Hrpa.
+subst.  
+unfold error_rel.
+rewrite Zaux.Zle_bool_true; try lia.
+simpl. unfold default_rel.
+field_simplify. admit. (* need fprec t <> 0 *)
+}
+intros Hlen fp rp rp_abs Hfp Hrp Hrpa Hin Hfin.
+assert (Hl: l = [] \/ l <> []).
+destruct l; auto.
+right.
+eapply hd_error_some_nil; simpl; auto.
+destruct Hl.
+(* list (a0 :: a :: l) *)
+(* case empty l *)
++
+subst; simpl.
+inversion Hrp.
+inversion Hfp.
+inversion Hrpa.
+specialize (IHl Hlen s0 s s1 H6 H2 H10 ).
+assert (In a [a]) by (simpl; auto).
+specialize (Hin a H11); clear H11.
+destruct Hin as (Hinx & Hiny).
+destruct a as [x y]; simpl in *.
+inversion H6; subst.
+assert (Hz: Binary.is_finite (fprec t) (femax t) neg_zero = true) by 
+  (simpl; auto).
+assert (Hov: fma_no_overflow t (FT2R x) (FT2R y) (@FT2R t neg_zero)).
+{ destruct Hfin as (Hfin & _ ). inversion H2; subst. unfold fma_no_overflow. simpl.
+  unfold rounded in Hfin; specialize (Hfin x y neg_zero eq_refl). simpl in Hfin; auto.
+}
+pose proof  fma_accurate t x Hinx y Hiny neg_zero Hz Hov.
+destruct H as (E & D & HE & HD & H).
+rewrite H.
+unfold error_rel.
+rewrite Zaux.Zle_bool_true; try lia.
+admit. (* algebra *)
++
+inversion Hrp.
+inversion Hfp.
+inversion Hrpa.
+assert ( Hin': 
+(forall xy : ftype t * ftype t,
+       In xy l ->
+       Binary.is_finite (fprec t) (femax t) (fst xy) = true /\
+       Binary.is_finite (fprec t) (femax t) (snd xy) = true)).
+{ intros. assert (Hin': In xy2 (a :: l)) by (simpl; auto) . 
+    specialize (Hin xy2 Hin'); auto. }
+specialize (IHl Hlen s0 s s1 H7 H3 H11 Hin').
+clear Hin'.
+assert ( Hfin' :
+      Binary.is_finite (fprec t) (femax t) (fst a) = true /\
+      Binary.is_finite (fprec t) (femax t) (snd a) = true /\
+      Binary.is_finite (fprec t) (femax t) s0 = true ).
+{
+assert (Hin': In a (a :: l)) by (simpl; auto).
+specialize (Hin a Hin'); destruct Hin; repeat split; auto.
+destruct Hfin as (A & B). rewrite <- H5 in B . 
+unfold BFMA in B.
+destruct a; simpl in *; try discriminate; auto;
+destruct f; simpl in *; try discriminate; auto;
+destruct f0; simpl in *; try discriminate; auto;
+destruct s0; simpl in *; try discriminate; auto.
+}
+destruct Hfin' as (A & B & C).
+destruct Hfin as (F & G).
+assert 
+(Hov: fma_no_overflow t (FT2R (fst a)) (FT2R (snd a)) (FT2R s0)).
+{ unfold fma_no_overflow. specialize (F (fst a) (snd a) s0). 
+  revert F. unfold rounded. intros;auto.
+}
+pose proof fma_accurate t (fst a) A (snd a) B s0 C Hov.
+destruct H12 as (d & e & Hd & He & H12).
+rewrite H12.
+(* algebra *)
 Admitted.
 
 End NAN.
