@@ -184,6 +184,7 @@ Inductive fma_dot_prod_rel {t : type} :
     fma_dot_prod_rel  l s ->
     fma_dot_prod_rel  (xy::l) (BFMA (fst xy) (snd xy) s).
 
+(*
 Lemma fma_dot_prod_rel_fold_right t :
 forall (v1 v2: list (ftype t)) fp, 
     fma_dot_prod_rel (rev (List.combine v1 v2)) fp -> 
@@ -195,6 +196,17 @@ induction (rev (List.combine v1 v2)).
 { intros. inversion H; subst; simpl. auto. }
 intros. inversion H; subst; simpl.
 specialize (IHl s H3 ). rewrite <- IHl; auto.
+Qed. *)
+
+Lemma fma_dot_prod_rel_fold_right t :
+forall (v1 v2: list (ftype t)), 
+    fma_dot_prod_rel (rev (List.combine v1 v2)) (dotprod t v1 v2).
+Proof.
+intros v1 v2. 
+ unfold dotprod; rewrite <- fold_left_rev_right. 
+induction (rev (List.combine v1 v2)).
+{ simpl; auto. apply fma_dot_prod_rel_nil. }
+simpl. apply fma_dot_prod_rel_cons. auto.
 Qed.
 
 
@@ -206,7 +218,6 @@ Inductive R_dot_prod_rel :
     R_dot_prod_rel  (xy::l)  (fst xy * snd xy + s).
 
 Definition sum: list R -> R := fold_right Rplus 0%R.
-
 
 Lemma sum_rev l:
 sum l = sum (rev l).
@@ -221,20 +232,16 @@ rewrite <- fold_left_Rplus_0; f_equal; nra.
 Qed.
 
 Lemma R_dot_prod_rel_fold_right t :
-forall (v1 v2: list (ftype t)) rp, 
+forall (v1 v2: list (ftype t)) , 
    let prods := map (uncurry Rmult) (map FR2 (List.combine v1 v2)) in
-    R_dot_prod_rel (rev (map FR2 (List.combine v1 v2))) rp -> 
-    sum prods = rp.
+    R_dot_prod_rel (rev (map FR2 (List.combine v1 v2))) (sum prods).
 Proof.
-intros. subst prods. rewrite sum_rev. rewrite <- map_rev.
-revert H. revert rp.
-induction (rev (map FR2 (List.combine v1 v2))).
-{ intros. inversion H; subst. auto. }
-intros. inversion H; subst; simpl.
-unfold sum in *.
-specialize (IHl s H3). rewrite IHl.
-f_equal. destruct a; simpl; auto.
+intros. subst prods. rewrite sum_rev. rewrite <- !map_rev.
+induction (map FR2 (rev (combine v1 v2))).
+{ simpl. apply R_dot_prod_rel_nil. }
+destruct a; simpl. apply R_dot_prod_rel_cons; auto.
 Qed.
+
 
 Lemma R_dot_prod_rel_single rs a:
 R_dot_prod_rel [a] rs -> rs = (fst a * snd a).
@@ -245,6 +252,17 @@ inversion H3; subst; nra.
 Qed.
 
 Definition Rabsp p : R * R := (Rabs (fst p), Rabs (snd p)).
+
+Lemma R_dot_prod_rel_fold_right_Rabs t :
+forall (v1 v2: list (ftype t)) , 
+   let prods := map (uncurry Rmult) (map Rabsp (map FR2 (List.combine v1 v2))) in
+    R_dot_prod_rel (rev (map Rabsp (map FR2 (List.combine v1 v2)))) (sum prods).
+Proof.
+intros. subst prods. rewrite sum_rev. rewrite <- !map_rev.
+induction (map Rabsp (map FR2 (rev (combine v1 v2)))).
+{ simpl. apply R_dot_prod_rel_nil. }
+destruct a; simpl. apply R_dot_prod_rel_cons; auto.
+Qed.
 
 Lemma R_dot_prod_rel_Rabs_eq :
 forall l s,
@@ -390,7 +408,17 @@ apply Rlt_le.
 apply length_not_empty_lt;auto.
 Qed.
 
-Lemma dotprod_error: 
+Lemma combine_map (A B : Type) (f : A -> B) g (v1 v2 : list A) :
+(forall a a0, (f a, f a0) = g (a, a0)) -> 
+combine (map f v1) (map f v2) = (map g (combine v1 v2)).
+Proof. intros.
+revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto.
+Qed.
+
+Lemma rev_empty (A: Type) : @rev A [] = []. simpl; auto. Qed.
+
+
+Lemma dotprod_error': 
   forall (t: type) (v1 v2: list (ftype t)), 
   length v1 = length v2 -> forall fp rp rp_abs,
   let ov := bpow Zaux.radix2 (femax t) in
@@ -405,8 +433,7 @@ Lemma dotprod_error:
   Rabs (FT2R fp - rp) <=  error_rel t (length v1  + 1) rp_abs.
 Proof.
 intros t v1 v2 Hlen.
-replace (combine (map FT2R v1) (map FT2R v2)) with (map FR2 (combine v1 v2)) in *
- by (clear; revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto).
+rewrite (combine_map _ _ FT2R FR2).
 replace (combine (map Rabs (map FT2R v1))
      (map Rabs (map FT2R v2))) with (map Rabsp (map FR2 (combine v1 v2))) in *
  by (clear; revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto).
@@ -601,10 +628,66 @@ ring_simplify.
 replace 0%Z with (Z.of_nat 0)%Z by lia;
 apply inj_le;
 apply length_not_empty_nat'; auto.
+try simpl; auto.
 Qed.
 
-(*
-Lemma dotprod_error': 
+
+Lemma combine_nil_r (A : Type) (l1 l2: list A) :
+  length l1 = length l2 -> 
+  combine l1 [] = combine l1 l2 -> l2 = [].
+Proof. intros. 
+rewrite combine_nil in H0. symmetry in H0.      
+apply length_zero_iff_nil in H0.
+      rewrite combine_length in H0.
+  rewrite H in H0; clear H. rewrite Nat.min_id in H0. 
+apply length_zero_iff_nil; auto.
+Qed.
+
+Lemma combine_nil_l (A : Type) (l1 l2: list A) :
+  length l1 = length l2 -> 
+  combine l1 [] = combine l1 l2 -> l1 = [].
+Proof. intros. 
+rewrite combine_nil in H0. symmetry in H0.      
+apply length_zero_iff_nil in H0.
+      rewrite combine_length in H0. symmetry in H.
+  rewrite H in H0; clear H. rewrite Nat.min_id in H0. 
+apply length_zero_iff_nil; auto.
+Qed.
+
+
+Lemma combine_app (A : Type) a1 a2 : forall (l1 l2 : list A),
+  length l1 = length l2 -> combine l1 l2 ++ [(a1,a2)] = combine (l1 ++ [a1]) (l2 ++ [a2]).
+Proof.
+induction l1. 
+{ intros. pose proof combine_nil_r A [] l2 H eq_refl; subst; simpl; auto. }
+intros. destruct l2. 
+{ pose proof combine_nil_l A (a :: l1) [] H eq_refl as H0; inversion H0. }
+assert (Hlen: length l1 = length l2) by auto.
+specialize (IHl1 l2 Hlen).
+simpl; rewrite IHl1; simpl; auto.
+Qed.
+
+
+Lemma combine_rev (A : Type) (l1 l2: list A) :
+length l1 = length l2 ->  
+combine (rev l1) (rev l2) = rev (combine l1 l2).
+Proof.
+revert l1.
+induction l2.
+{ intros. rewrite !combine_nil; simpl; auto. }
+intros. destruct l1.
+{ simpl. auto. }
+assert (Hlen: length l1 = length l2).
+  simpl in H. auto.
+specialize (IHl2 l1 Hlen).
+simpl. rewrite <- IHl2.
+rewrite <- combine_app; auto.
+rewrite !rev_length; auto.
+Qed.
+
+
+
+Lemma dotprod_error: 
   forall (t: type)  (v1 v2: list (ftype t)), 
   length v1 = length v2 ->
   let prods := map (uncurry Rmult) (List.combine (map FT2R v1) (map FT2R v2)) in
@@ -618,48 +701,31 @@ Lemma dotprod_error':
     Rabs (FT2R (dotprod t v1 v2) - sum prods) <= error_rel t (length v1 + 1) (sum abs_prods).
 Proof.
 intros t v1 v2 Hlen. intros. 
-pose proof fma_dot_prod_rel_fold_right t v1 v2 as HFrel.
-pose proof R_dot_prod_rel_fold_right t v1 v2 as HRrel.
-
 assert (Datatypes.length (combine v1 v2) = length v1) by 
  (rewrite combine_length; lia).
+assert (Hlenr : length (rev v1) = length (rev v2)) by (rewrite !rev_length; auto).
+pose proof dotprod_error' t (rev v1) (rev v2) Hlenr 
+  (dotprod t v1 v2) (sum prods) (sum abs_prods) as H2.
+rewrite rev_length in H2.
+rewrite combine_rev in H2; auto.
+apply H2; clear H2; auto.
+{ apply (fma_dot_prod_rel_fold_right t v1 v2). }
+{ rewrite !map_rev.
+rewrite combine_rev.
+subst prods.
+rewrite (combine_map _ _ FT2R FR2); try simpl; auto.
+pose proof R_dot_prod_rel_fold_right t v1 v2 as HRrel; simpl in HRrel; auto.
+rewrite !map_length; auto. }
+{ rewrite !map_rev.
+rewrite combine_rev.
+subst abs_prods.
+rewrite (combine_map _ _ Rabs Rabsp); try simpl; auto.
+rewrite (combine_map _ _ FT2R FR2); try simpl; auto.
+pose proof R_dot_prod_rel_fold_right_Rabs t v1 v2 as HRrel; simpl in HRrel; auto. 
+rewrite !map_length; auto. }
+intros. apply in_rev in H2. specialize (H xy H2); auto.
+Qed.
 
-assert (Hlenr : length (rev v1) = length (rev v2)) by admit.
-pose proof dotprod_error t (rev v1) (rev v2) Hlenr 
-  (dotprod t v1 v2) (sum prods) (sum abs_prods).
-replace (length (rev v1)) with (length v1) in H2.
-apply H2; clear H2.
-
-
-
-
-
-
-
-
-simpl in HRrel; subst prods.
-
-replace (combine (rev v1) (rev v2)) with (rev (combine v1 v2)) in *.
-replace (combine (map FT2R (rev v1)) (map FT2R (rev v2))) with
-  (rev (map FR2 (combine v1 v2))) in *.
-replace (combine (map Rabs (map FT2R (rev v1)))
-          (map Rabs (map FT2R (rev v2)))) with
-  (rev (combine (map Rabs (map FT2R v1))
-          (map Rabs (map FT2R v2)))) in *.
-replace (map FR2 (combine v1 v2)) with 
-   (combine (map FT2R v1) (map FT2R v2)) in *.
-specialize (H2 HFrel HRrel).
-
- simpl. 
-replace (map (uncurry Rmult) (combine (map FT2R v1) (map FT2R v2))) with
-  (map (uncurry Rmult) (map FR2 (combine v1 v2))) by
-  (clear; revert v2; induction v1; destruct v2; simpl; auto; f_equal; auto).
-pose proof (R_dot_prod_rel_fold_right t v1 v2).
-
-pose proof dotprod_error t v1 v2 Hlen.
-pose proof R_dot_prod_rel_fold_right t v1 v2.
-
-*)
 
 End NAN.
 
